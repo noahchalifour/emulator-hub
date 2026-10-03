@@ -68,3 +68,42 @@ async def test_snapshot_is_a_jpeg_for_a_live_lease(engine, app):
         ok = client.get(f"/api/leases/{grant.lease.id}/snapshot", headers={"X-authentik-username": "noah"})
         assert ok.status_code == 200 and ok.headers["content-type"] == "image/jpeg" and ok.content == b"thumb"
         assert client.get("/api/leases/nope/snapshot", headers={"X-authentik-username": "noah"}).status_code == 404
+
+
+async def test_input_sent_before_disconnect_is_still_delivered(engine):
+    """Input is applied in order and nothing a viewer sent is lost when it
+    closes right after. (The cancellation race this guards against only shows
+    against a real emulator; tests/e2e/test_liveview.py covers that.)"""
+    import asyncio
+    import time
+
+    class SlowScreen(FakeScreen):
+        async def text(self, text):
+            await asyncio.sleep(0.5)  # paced typing: longer than the close takes
+            self.inputs.append(("text", text))
+
+    screens = []
+
+    def factory(pod_ip):
+        s = SlowScreen(pod_ip)
+        screens.append(s)
+        return s
+
+    app = create_ui_app(engine, screen_factory=factory)
+    grant = await engine.acquire("phone", "a", 30, 1)
+    with (
+        TestClient(app) as client,
+        client.websocket_connect(f"/api/leases/{grant.lease.id}/live", headers={"X-authentik-username": "noah"}) as ws,
+    ):
+        ws.receive_bytes()
+        for word in ("one", "two", "three"):
+            ws.send_text(json.dumps({"t": "text", "text": word}))
+        # Make sure the server has read all three before the close arrives.
+        time.sleep(0.2)
+        ws.close()
+        # The server finishes typing after the close; wait for it to drain.
+        deadline = time.monotonic() + 5
+        while not screens[0].closed and time.monotonic() < deadline:
+            time.sleep(0.05)
+    assert screens[0].inputs == [("text", "one"), ("text", "two"), ("text", "three")]
+    assert screens[0].closed

@@ -3,7 +3,7 @@ the `PodBackend` protocol, so tests use FakePods instead of a cluster."""
 
 from typing import Protocol
 
-from emulator_hub.catalog import SYSTEM_IMAGES
+from emulator_hub.catalog import DEVICE_MIN_RAM_MB, DISPLAY_OVERHEAD_MB, SYSTEM_IMAGES
 from emulator_hub.models import Profile
 
 LABEL_APP = "app.kubernetes.io/name"
@@ -20,8 +20,22 @@ def pod_name(slot: int, lease_id: str) -> str:
     return f"emu-slot-{slot}-{lease_id[:8]}"
 
 
+def memory_mb(profile: Profile) -> tuple[int, int]:
+    """(request, limit) in MiB. The guest gets at least the image's minimum RAM
+    and the display adds host-side buffers; a limit below that is an OOMKill
+    mid-boot, which the hub can only report as a failed boot."""
+    guest = max(
+        profile.ram_mb,
+        SYSTEM_IMAGES[profile.system_image].min_ram_mb,
+        DEVICE_MIN_RAM_MB.get(profile.device, 0),
+    )
+    overhead = DISPLAY_OVERHEAD_MB[profile.device]
+    return guest + overhead, guest + overhead + 1024
+
+
 def build_pod(*, namespace: str, image: str, slot: int, lease_id: str, profile: Profile) -> dict:
     sysimg = SYSTEM_IMAGES[profile.system_image]
+    mem_request, mem_limit = memory_mb(profile)
     return {
         "apiVersion": "v1",
         "kind": "Pod",
@@ -78,10 +92,10 @@ def build_pod(*, namespace: str, image: str, slot: int, lease_id: str, profile: 
                     "resources": {
                         "requests": {
                             "cpu": str(profile.cores),
-                            "memory": f"{profile.ram_mb + 1024}Mi",
+                            "memory": f"{mem_request}Mi",
                             "squat.ai/kvm": "1",
                         },
-                        "limits": {"memory": f"{profile.ram_mb + 2048}Mi", "squat.ai/kvm": "1"},
+                        "limits": {"memory": f"{mem_limit}Mi", "squat.ai/kvm": "1"},
                     },
                     "volumeMounts": [{"name": "avd", "mountPath": "/avd"}],
                 }

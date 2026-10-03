@@ -1,0 +1,96 @@
+name: e2e
+
+# The full-stack end-to-end suite (tests/e2e): the hub and emulator images built
+# from this commit, deployed into kind on a KVM runner with MetalLB slot IPs,
+# ingress-nginx + fake authentik, NetworkPolicies and the KVM device plugin.
+# See e2e/README.md. Release tags run it through build.yml (workflow_call).
+on:
+  schedule:
+    - cron: "17 7 * * *"
+  workflow_dispatch:
+    inputs:
+      pytest_args:
+        description: Extra pytest args (e.g. -k lifecycle)
+        required: false
+        default: ""
+  workflow_call:
+  pull_request:
+    paths:
+      - "e2e/**"
+      - "tests/e2e/**"
+      - ".github/workflows/e2e.yml"
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # Control plane against the gRPC stand-in emulator: every lifecycle, queue,
+  # MCP, UI, live-view, reconcile and cluster test, minus the Android-only ones.
+  control-plane:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Cluster up (fake emulator)
+        env:
+          E2E_EMULATOR: fake
+        run: ./e2e/up.sh
+      - name: Suite
+        env:
+          EXTRA: ${{ inputs.pytest_args }}
+        run: |
+          read -ra extra <<<"$EXTRA"
+          ./e2e/run.sh tests/e2e --timeout=1200 --ignore=tests/e2e/test_image.py "${extra[@]}"
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-control-plane
+          path: e2e/.state/artifacts
+          if-no-files-found: ignore
+
+  # The tests that exercise Android itself, against real emulators under KVM.
+  # One 2-core slot: a 4 vCPU runner also hosts kind, and a 1-core emulator
+  # hangs. Multi-slot behaviour is covered by control-plane above.
+  real-emulator:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      # ubuntu-latest has ~14 GB free; the emulator image is ~17.5 GB and kind
+      # keeps a second copy in the KVM node's containerd.
+      - name: Free disk
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/share/swift
+          sudo docker image prune -af
+          df -h /
+      - name: Cluster up (real emulator)
+        env:
+          E2E_EMULATOR: real
+          E2E_SLOTS: "1"
+        run: ./e2e/up.sh
+      # Fail fast with the emulator's own log if a plain boot inside kind does not work.
+      - name: Boot probe
+        run: |
+          set -x
+          docker exec emulator-hub-e2e-worker2 ls -ln /dev/kvm
+          ./e2e/run.sh tests/e2e/test_lifecycle.py -k "booting_grant_then_poll" -x
+      - if: failure()
+        name: Boot probe logs
+        run: find e2e/.state/artifacts -name '*.log' -path '*emu-slot*' -exec tail -60 {} \;
+      - name: Suite
+        env:
+          EXTRA: ${{ inputs.pytest_args }}
+        run: |
+          read -ra extra <<<"$EXTRA"
+          ./e2e/run.sh tests/e2e --timeout=2400 --ignore=tests/e2e/test_image.py -m "e2e and android" "${extra[@]}"
+      - if: always()
+        run: df -h /
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-real-emulator
+          path: e2e/.state/artifacts
+          if-no-files-found: ignore

@@ -1,0 +1,27 @@
+# Client Pods for in-cluster checks: e2e-client may call MCP (like an in-cluster
+# agent); e2e-scratch is an arbitrary namespace that should be denied.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: e2e-client
+  labels: {emulator-hub/mcp: allowed}
+---
+apiVersion: v1
+kind: Namespace
+metadata: {name: e2e-scratch}
+---
+apiVersion: v1
+kind: Pod
+metadata: {name: toolbox, namespace: e2e-client, labels: {app: toolbox}}
+spec:
+  terminationGracePeriodSeconds: 0
+  containers:
+    - {name: toolbox, image: "${TOOLBOX_IMAGE}", imagePullPolicy: IfNotPresent, command: [sleep, infinity]}
+---
+apiVersion: v1
+kind: Pod
+metadata: {name: toolbox, namespace: e2e-scratch, labels: {app: toolbox}}
+spec:
+  terminationGracePeriodSeconds: 0
+  containers:
+    - {name: toolbox, image: "${TOOLBOX_IMAGE}", imagePullPolicy: IfNotPresent, command: [sleep, infinity]}

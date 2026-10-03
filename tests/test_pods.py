@@ -50,9 +50,24 @@ def test_pod_is_never_restarted_and_opts_out_of_descheduling():
 def test_pod_requests_its_cores_and_has_no_cpu_limit():
     res = manifest("tablet")["spec"]["containers"][0]["resources"]
     assert res["requests"]["cpu"] == "2"
-    assert res["requests"]["memory"] == "4096Mi" and res["limits"]["memory"] == "5120Mi"
+    # tablet: the emulator raises a pixel_tablet guest to 4096 MB; + 2048
+    # display overhead, + 1024 headroom for the limit
+    assert res["requests"]["memory"] == "6144Mi" and res["limits"]["memory"] == "7168Mi"
     assert "cpu" not in res["limits"]
 
 
 def test_pod_joins_the_nodes_kvm_group():
     assert manifest()["spec"]["securityContext"]["supplementalGroups"] == [993]
+
+
+def test_pod_memory_covers_the_images_minimum_guest_ram():
+    from emulator_hub.models import Profile
+    from emulator_hub.pods import memory_mb
+
+    # The emulator raises an API 35 guest to 2560 MB, and a tablet to 4096 MB.
+    phone = Profile("p", "phone", "android-35-google-apis", "pixel_8", 1024, 2)
+    assert memory_mb(phone) == (2560 + 1024, 2560 + 1024 + 1024)
+    tablet = Profile("s", "tablet", "android-35-google-apis", "pixel_tablet", 1024, 2)
+    assert memory_mb(tablet) == (4096 + 2048, 4096 + 2048 + 1024)
+    tv = Profile("t", "tv", "android-36-android-tv", "tv_720p", 4096, 2)
+    assert memory_mb(tv) == (4096 + 1024, 4096 + 1024 + 1024)

@@ -1,0 +1,9 @@
+{
+  "name": "emulator-hub-e2e-mcp-ts",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.0",
+    "axe-core": "4.13.0"
+  }
+}

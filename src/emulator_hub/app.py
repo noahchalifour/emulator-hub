@@ -114,6 +114,7 @@ async def serve(settings: Settings) -> None:
             emulator_image=settings.emulator_image,
             slot_ips=settings.slot_ip_list,
             boot_timeout_s=settings.boot_timeout_s,
+            max_age_s=settings.max_age_s,
         ),
     )
     common = dict(host="0.0.0.0", proxy_headers=True, forwarded_allow_ips="*", log_level="info")

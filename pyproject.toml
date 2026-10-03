@@ -26,6 +26,12 @@ dev = [
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
 ]
+# The end-to-end suite (tests/e2e); see e2e/README.md.
+e2e = [
+    "playwright==1.58.0",
+    "pytest-timeout>=2.4.0",
+    "websockets>=15",
+]
 
 [build-system]
 requires = ["uv_build>=0.10.0,<0.11"]
@@ -35,6 +41,16 @@ build-backend = "uv_build"
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
+# tests/e2e needs a live cluster and the e2e dependency group: e2e/run.sh
+# runs it (with `-o addopts=`), so plain `uv run pytest` never collects it.
+addopts = "-m 'not e2e' --ignore=tests/e2e"
+markers = [
+    "e2e: end-to-end against a real cluster (e2e/up.sh)",
+    "real_emulator: needs the real Android emulator image (E2E_EMULATOR=real)",
+    "android: exercises the emulator itself; the real-emulator CI job runs these (plus real_emulator)",
+    "fake_only: asserts on the fake emulator's event log",
+    "disruptive: restarts or breaks the hub or a node; runs last",
+]
 
 [tool.ruff]
 line-length = 120
@@ -42,3 +58,7 @@ extend-exclude = ["src/emulator_hub/_grpc"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]
+
+[tool.ruff.lint.per-file-ignores]
+# Inline Kubernetes manifests and test tables read better unwrapped.
+"tests/e2e/*" = ["E501"]

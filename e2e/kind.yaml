@@ -1,0 +1,23 @@
+# Rendered by up.sh: ${DATA_DIR} is substituted.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: emulator-hub-e2e
+nodes:
+  - role: control-plane
+  # Where the hub normally runs. It shares /e2e-data with the KVM worker so the
+  # hub's hostPath "network disk" survives a drain onto the other node.
+  - role: worker
+    labels:
+      e2e/role: hub
+    extraMounts:
+      - hostPath: ${DATA_DIR}
+        containerPath: /e2e-data
+  # The only node with /dev/kvm and the emulator-hub/kvm label.
+  - role: worker
+    labels:
+      emulator-hub/kvm: "true"
+      e2e/role: kvm
+    extraMounts:
+      - hostPath: ${DATA_DIR}
+        containerPath: /e2e-data
+${KVM_MOUNT}

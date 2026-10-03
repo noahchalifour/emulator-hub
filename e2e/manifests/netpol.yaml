@@ -1,0 +1,34 @@
+# The security boundary from auth.py: the UI port only from ingress-nginx, the
+# machine port from ingress-nginx or opted-in namespaces, an emulator's gRPC
+# bridge only from the hub; adb (5557) from anywhere, since the slot
+# LoadBalancer is how agents reach it.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: hub, namespace: emulator-hub}
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/name: emulator-hub}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: ingress-nginx}
+      ports: [{port: 8080}, {port: 8081}]
+    - from:
+        - namespaceSelector:
+            matchLabels: {emulator-hub/mcp: allowed}
+      ports: [{port: 8081}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: emulator, namespace: emulator-hub}
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/name: emulator}
+  policyTypes: [Ingress]
+  ingress:
+    - ports: [{port: 5557}]
+    - from:
+        - podSelector:
+            matchLabels: {app.kubernetes.io/name: emulator-hub}
+      ports: [{port: 8554}]

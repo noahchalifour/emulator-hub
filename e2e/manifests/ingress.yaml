@@ -1,0 +1,40 @@
+# The UI host is gated by (fake) authentik forward-auth exactly like prod:
+# auth-response-headers makes nginx overwrite any client-supplied
+# X-authentik-username with the auth response's value.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: emulator-hub-ui
+  namespace: emulator-hub
+  annotations:
+    nginx.ingress.kubernetes.io/auth-url: http://fake-authentik.e2e-auth.svc.cluster.local/auth
+    nginx.ingress.kubernetes.io/auth-response-headers: X-authentik-username
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: hub.e2e.test
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend: {service: {name: emulator-hub, port: {name: ui}}}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: emulator-hub-mcp
+  namespace: emulator-hub
+  annotations:
+    # acquire may legitimately hold the request for wait_seconds (<=600) plus
+    # boot_wait_seconds; nginx's 60s default would cut a queued agent off.
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "1300"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "1300"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: mcp.e2e.test
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend: {service: {name: emulator-hub, port: {name: machine}}}

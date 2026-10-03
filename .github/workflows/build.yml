@@ -20,18 +20,35 @@ jobs:
       - run: ./scripts/gen-grpc.sh && git diff --exit-code src/emulator_hub/_grpc
       - run: uv run pytest -q
 
-  # Boots each form factor for real under KVM and asserts the hub's own
-  # GrpcBootProbe sees it booted. This is the only test that proves the
-  # emulator image works; it runs on every PR because the image is what
-  # breaks when the SDK moves.
-  emulator-smoke:
+  # The emulator image contract (tests/e2e/test_image.py), once per catalog
+  # entry: every device with every system image that can boot it. The matrix
+  # is generated from catalog.py so it cannot drift.
+  catalog-matrix:
     runs-on: ubuntu-latest
+    outputs:
+      include: ${{ steps.m.outputs.include }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - id: m
+        run: |
+          uv run --frozen python - >>"$GITHUB_OUTPUT" <<'PY'
+          import json
+          from emulator_hub.catalog import DEVICES, SYSTEM_IMAGES
+          rows = [{"image": spec.package, "device": d}
+                  for ff, devs in DEVICES.items() for d in devs
+                  for spec in SYSTEM_IMAGES.values() if ff in spec.form_factors]
+          print("include=" + json.dumps(rows))
+          PY
+
+  emulator-image:
+    needs: catalog-matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - {image: "system-images;android-35;google_apis;x86_64", device: pixel_8}
-          - {image: "system-images;android-36;android-tv;x86_64", device: tv_1080p}
+        include: ${{ fromJSON(needs.catalog-matrix.outputs.include) }}
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
@@ -45,43 +62,34 @@ jobs:
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules && sudo udevadm trigger --name-match=kvm
+      - run: sudo apt-get install -y -qq adb
+      # Lets a container get containerd 2's RLIMIT_NOFILE (1073741816).
+      - run: sudo sysctl -w fs.nr_open=1073741816
       - run: docker build -t emulator:ci emulator/
-      - name: Boot and probe
+      - name: Image size
         run: |
-          docker run -d --name emu --device /dev/kvm -p 8554:8554 -p 5557:5557 \
-            -e SYSTEM_IMAGE="${{ matrix.image }}" -e DEVICE=${{ matrix.device }} -e RAM_MB=2048 -e CORES=2 \
-            emulator:ci
-          uv sync --frozen
-          uv run python - <<'PY'
-          import asyncio, time
-          from emulator_hub.emulator_grpc import GrpcBootProbe, GrpcScreen
-          async def main():
-              deadline = time.time() + 480
-              while time.time() < deadline:
-                  if await GrpcBootProbe().booted("127.0.0.1"):
-                      shot = await GrpcScreen("127.0.0.1").snapshot()
-                      assert shot[:2] == b"\xff\xd8", "snapshot is not a JPEG"
-                      print("booted; snapshot", len(shot), "bytes"); return
-                  await asyncio.sleep(5)
-              raise SystemExit("emulator did not boot in 8 minutes")
-          asyncio.run(main())
-          PY
-      - name: ADB is reachable on the published port
-        run: |
-          sudo apt-get install -y -qq adb
-          # Use the same adb key the container pre-authorized into the guest
-          # (see emulator/entrypoint.sh) so this external client doesn't hit
-          # a fresh, unauthorized identity on android-tv images.
-          mkdir -p ~/.android
-          docker cp emu:/home/emu/.android/adbkey ~/.android/adbkey
-          export ADB_VENDOR_KEYS=~/.android/adbkey
-          adb connect 127.0.0.1:5557
-          test "$(adb -s 127.0.0.1:5557 shell getprop sys.boot_completed | tr -d '\r')" = 1
-      - if: failure()
-        run: docker logs emu | tail -100
+          docker image inspect -f '{{.Size}}' emulator:ci | awk '{printf "image size: %.1f GB\n", $1/1e9}' | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Image contract
+        id: contract
+        env:
+          E2E_IMAGE: emulator:ci
+          E2E_SYSTEM_IMAGE: ${{ matrix.image }}
+          E2E_DEVICE: ${{ matrix.device }}
+        run: uv run --frozen --group e2e pytest tests/e2e/test_image.py -m e2e -o addopts= -rA --timeout=1800
+      - name: Boot time
+        if: always()
+        env:
+          DEVICE: ${{ matrix.device }}
+          BOOT: ${{ steps.contract.outputs.boot_seconds }}
+        run: echo "boot $DEVICE in ${BOOT}s" | tee -a "$GITHUB_STEP_SUMMARY"
+
+  # The full-stack suite gates every release.
+  e2e:
+    if: startsWith(github.ref, 'refs/tags/v')
+    uses: ./.github/workflows/e2e.yml
 
   image:
-    needs: [test, emulator-smoke]
+    needs: [test, emulator-image, e2e]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:

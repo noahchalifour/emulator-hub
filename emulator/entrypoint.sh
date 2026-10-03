@@ -5,6 +5,14 @@
 #   RAM_MB, CORES
 set -euo pipefail
 
+# containerd >= 2 (and so kind, k3s, recent kubeadm nodes) starts containers
+# with RLIMIT_NOFILE=1073741816. The emulator's vCPU threads then hang at boot
+# ("detected a hanging thread 'QEMU2 CPU0 thread'") and it aborts; Docker's
+# 1048576 boots fine. Clamp it before anything starts.
+if (($(ulimit -n) > 1048576)); then
+  ulimit -n 1048576
+fi
+
 if [[ ! -w /dev/kvm ]]; then
   echo "FATAL: /dev/kvm missing or not writable. The Pod must request squat.ai/kvm and run on an emulator-hub/kvm=true node." >&2
   exit 3
@@ -65,6 +73,11 @@ adb start-server
 IFS=';' read -r _ _ tag abi <<<"$SYSTEM_IMAGE"
 echo no | avdmanager create avd --force --name lease --package "$SYSTEM_IMAGE" \
   --tag "$tag" --abi "$abi" --device "$DEVICE" >/dev/null
+# avdmanager defaults hw.keyboard=no, and then the emulator silently drops
+# every gRPC sendKey (live-view keys and text): only touch gets through.
+sed -i 's/^hw.keyboard=.*/hw.keyboard=yes/' "$ANDROID_AVD_HOME/lease.avd/config.ini"
+grep -q '^hw.keyboard=' "$ANDROID_AVD_HOME/lease.avd/config.ini" ||
+  echo 'hw.keyboard=yes' >>"$ANDROID_AVD_HOME/lease.avd/config.ini"
 
 # adbd: the emulator binds 127.0.0.1:5555 only; socat publishes it on the Pod
 # IP as :5555 via port 5557 -> see Service targetPort. gRPC (-grpc) already

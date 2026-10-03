@@ -1,0 +1,11 @@
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata: {name: e2e, namespace: metallb-system}
+spec:
+  addresses: ["${POOL_START}-${POOL_END}"]
+---
+apiVersion: metallb.io/v1beta1
+kind: L2Advertisement
+metadata: {name: e2e, namespace: metallb-system}
+spec:
+  ipAddressPools: [e2e]

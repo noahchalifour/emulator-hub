@@ -15,8 +15,21 @@ uv run pytest
 ```
 
 `uv sync` installs the runtime and dev dependency groups into `.venv/`.
-`uv run pytest` runs the test suite. `./scripts/gen-grpc.sh` regenerates the
+`uv run pytest` runs the unit and integration suite. `./scripts/gen-grpc.sh` regenerates the
 gRPC/protobuf bindings in `src/emulator_hub/_grpc` from `proto/`.
+
+## End-to-end tests
+
+`tests/e2e` runs the whole service in a kind cluster: real Pods, MetalLB slot
+IPs, ingress-nginx with authentik-style forward auth, NetworkPolicies, and (on
+Linux with KVM) real Android emulators.
+
+```bash
+./e2e/up.sh && ./e2e/run.sh
+```
+
+See [`e2e/README.md`](e2e/README.md). CI runs it nightly, on changes to the
+suite, and before every release (`.github/workflows/e2e.yml`).
 
 ## Images
 

@@ -1,0 +1,371 @@
+{
+  "acquire": {
+    "description": "Boot a fresh emulator from `profile` and lease it to you.\n\n        holder: who you are, e.g. \"claude-code@mac/LAB-71\" (shown in the UI).\n        ttl_minutes: lease expires this long after the last heartbeat (1-120).\n        wait_seconds: how long to queue if all slots are busy before giving up (0-600).\n        boot_wait_seconds: how long to wait for the boot before returning state\n          \"booting\" (0-600); poll heartbeat(lease_id) until state is \"leased\".\n        ",
+    "input_schema": {
+      "properties": {
+        "boot_wait_seconds": {
+          "default": 30,
+          "title": "Boot Wait Seconds",
+          "type": "integer"
+        },
+        "holder": {
+          "title": "Holder",
+          "type": "string"
+        },
+        "profile": {
+          "title": "Profile",
+          "type": "string"
+        },
+        "ttl_minutes": {
+          "default": 30,
+          "title": "Ttl Minutes",
+          "type": "integer"
+        },
+        "wait_seconds": {
+          "default": 300,
+          "title": "Wait Seconds",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "profile",
+        "holder"
+      ],
+      "title": "acquireArguments",
+      "type": "object"
+    },
+    "output_schema": {
+      "properties": {
+        "adb": {
+          "title": "Adb",
+          "type": "string"
+        },
+        "expires_at": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Expires At"
+        },
+        "in_cluster": {
+          "title": "In Cluster",
+          "type": "string"
+        },
+        "lease_id": {
+          "title": "Lease Id",
+          "type": "string"
+        },
+        "profile": {
+          "title": "Profile",
+          "type": "string"
+        },
+        "slot": {
+          "title": "Slot",
+          "type": "integer"
+        },
+        "state": {
+          "title": "State",
+          "type": "string"
+        }
+      },
+      "required": [
+        "lease_id",
+        "state",
+        "profile",
+        "slot",
+        "adb",
+        "in_cluster",
+        "expires_at"
+      ],
+      "title": "LeaseGrant",
+      "type": "object"
+    }
+  },
+  "heartbeat": {
+    "description": "Extend a lease by its ttl_minutes, or report progress of one still booting.\n        Leases hard-stop 4 hours after acquire.",
+    "input_schema": {
+      "properties": {
+        "lease_id": {
+          "title": "Lease Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "lease_id"
+      ],
+      "title": "heartbeatArguments",
+      "type": "object"
+    },
+    "output_schema": {
+      "properties": {
+        "adb": {
+          "title": "Adb",
+          "type": "string"
+        },
+        "expires_at": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Expires At"
+        },
+        "in_cluster": {
+          "title": "In Cluster",
+          "type": "string"
+        },
+        "lease_id": {
+          "title": "Lease Id",
+          "type": "string"
+        },
+        "profile": {
+          "title": "Profile",
+          "type": "string"
+        },
+        "slot": {
+          "title": "Slot",
+          "type": "integer"
+        },
+        "state": {
+          "title": "State",
+          "type": "string"
+        }
+      },
+      "required": [
+        "lease_id",
+        "state",
+        "profile",
+        "slot",
+        "adb",
+        "in_cluster",
+        "expires_at"
+      ],
+      "title": "LeaseGrant",
+      "type": "object"
+    }
+  },
+  "list_profiles": {
+    "description": "List bootable emulator profiles and how many slots are free right now.",
+    "input_schema": {
+      "properties": {},
+      "title": "list_profilesArguments",
+      "type": "object"
+    },
+    "output_schema": {
+      "$defs": {
+        "ProfileInfo": {
+          "properties": {
+            "cores": {
+              "title": "Cores",
+              "type": "integer"
+            },
+            "device": {
+              "title": "Device",
+              "type": "string"
+            },
+            "form_factor": {
+              "title": "Form Factor",
+              "type": "string"
+            },
+            "name": {
+              "title": "Name",
+              "type": "string"
+            },
+            "ram_mb": {
+              "title": "Ram Mb",
+              "type": "integer"
+            },
+            "system_image": {
+              "title": "System Image",
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "form_factor",
+            "system_image",
+            "device",
+            "ram_mb",
+            "cores"
+          ],
+          "title": "ProfileInfo",
+          "type": "object"
+        }
+      },
+      "properties": {
+        "free_slots": {
+          "title": "Free Slots",
+          "type": "integer"
+        },
+        "profiles": {
+          "items": {
+            "$ref": "#/$defs/ProfileInfo"
+          },
+          "title": "Profiles",
+          "type": "array"
+        },
+        "queue_depth": {
+          "title": "Queue Depth",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "profiles",
+        "free_slots",
+        "queue_depth"
+      ],
+      "title": "ProfileList",
+      "type": "object"
+    }
+  },
+  "release": {
+    "description": "Destroy your emulator and free its slot for the next agent.",
+    "input_schema": {
+      "properties": {
+        "lease_id": {
+          "title": "Lease Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "lease_id"
+      ],
+      "title": "releaseArguments",
+      "type": "object"
+    },
+    "output_schema": {
+      "properties": {
+        "end_reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "End Reason"
+        },
+        "lease_id": {
+          "title": "Lease Id",
+          "type": "string"
+        },
+        "state": {
+          "title": "State",
+          "type": "string"
+        }
+      },
+      "required": [
+        "lease_id",
+        "state",
+        "end_reason"
+      ],
+      "title": "Released",
+      "type": "object"
+    }
+  },
+  "status": {
+    "description": "Every slot with its current lease, plus queue depth.",
+    "input_schema": {
+      "properties": {},
+      "title": "statusArguments",
+      "type": "object"
+    },
+    "output_schema": {
+      "$defs": {
+        "SlotInfo": {
+          "properties": {
+            "expires_at": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Expires At"
+            },
+            "holder": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Holder"
+            },
+            "lease_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Lease Id"
+            },
+            "profile": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Profile"
+            },
+            "slot": {
+              "title": "Slot",
+              "type": "integer"
+            },
+            "state": {
+              "title": "State",
+              "type": "string"
+            }
+          },
+          "required": [
+            "slot",
+            "state",
+            "lease_id",
+            "profile",
+            "holder",
+            "expires_at"
+          ],
+          "title": "SlotInfo",
+          "type": "object"
+        }
+      },
+      "properties": {
+        "queue_depth": {
+          "title": "Queue Depth",
+          "type": "integer"
+        },
+        "slots": {
+          "items": {
+            "$ref": "#/$defs/SlotInfo"
+          },
+          "title": "Slots",
+          "type": "array"
+        }
+      },
+      "required": [
+        "slots",
+        "queue_depth"
+      ],
+      "title": "HubStatus",
+      "type": "object"
+    }
+  }
+}

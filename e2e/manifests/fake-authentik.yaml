@@ -1,0 +1,56 @@
+# Stands in for authentik's forward-auth outpost: the e2e_user cookie is the
+# "session". No cookie, no entry.
+apiVersion: v1
+kind: Namespace
+metadata: {name: e2e-auth}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: fake-authentik, namespace: e2e-auth}
+data:
+  server.py: |
+    from http.cookies import SimpleCookie
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    class Auth(BaseHTTPRequestHandler):
+        def do_GET(self):
+            jar = SimpleCookie(self.headers.get("Cookie", ""))
+            user = jar["e2e_user"].value if "e2e_user" in jar else ""
+            self.send_response(200 if user else 401)
+            if user:
+                self.send_header("X-authentik-username", user)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def log_message(self, *args):
+            pass
+
+    ThreadingHTTPServer(("0.0.0.0", 8000), Auth).serve_forever()
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: fake-authentik, namespace: e2e-auth}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: fake-authentik}}
+  template:
+    metadata: {labels: {app: fake-authentik}}
+    spec:
+      containers:
+        - name: auth
+          image: python:3.12-alpine
+          imagePullPolicy: IfNotPresent
+          command: [python, /app/server.py]
+          ports: [{containerPort: 8000}]
+          readinessProbe: {tcpSocket: {port: 8000}, periodSeconds: 2}
+          volumeMounts: [{name: app, mountPath: /app}]
+      volumes:
+        - name: app
+          configMap: {name: fake-authentik}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: fake-authentik, namespace: e2e-auth}
+spec:
+  selector: {app: fake-authentik}
+  ports: [{port: 80, targetPort: 8000}]

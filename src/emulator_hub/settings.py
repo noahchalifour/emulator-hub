@@ -12,6 +12,8 @@ class Settings(BaseSettings):
     api_token: str
     reap_interval_s: float = 15
     boot_timeout_s: float = 180
+    # Hard stop for a lease regardless of heartbeats.
+    max_age_s: float = 4 * 3600
     ui_port: int = 8080
     machine_port: int = 8081
 

@@ -1,0 +1,120 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: emulator-hub
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata: {name: emulator-hub-emulator}
+value: 1000
+description: Emulator Pods leased by emulator-hub.
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: emulator-hub, namespace: emulator-hub}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: {name: emulator-hub, namespace: emulator-hub}
+rules:
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [create, delete, get, list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: emulator-hub, namespace: emulator-hub}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: emulator-hub}
+subjects:
+  - {kind: ServiceAccount, name: emulator-hub, namespace: emulator-hub}
+---
+apiVersion: v1
+kind: Secret
+metadata: {name: emulator-hub, namespace: emulator-hub}
+stringData:
+  api-token: ${API_TOKEN}
+---
+# A hostPath shared by both workers stands in for network storage, so the hub
+# can be drained onto another node and keep its SQLite file.
+apiVersion: v1
+kind: PersistentVolume
+metadata: {name: emulator-hub-data}
+spec:
+  capacity: {storage: 1Gi}
+  accessModes: [ReadWriteOnce]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: e2e-shared
+  hostPath: {path: /e2e-data/hub, type: DirectoryOrCreate}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: {name: emulator-hub-data, namespace: emulator-hub}
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: e2e-shared
+  volumeName: emulator-hub-data
+  resources: {requests: {storage: 1Gi}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: emulator-hub
+  namespace: emulator-hub
+  labels: {app.kubernetes.io/name: emulator-hub}
+spec:
+  replicas: 1
+  # One SQLite writer, ever.
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app.kubernetes.io/name: emulator-hub}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: emulator-hub}
+    spec:
+      serviceAccountName: emulator-hub
+      terminationGracePeriodSeconds: 10
+      affinity:
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              preference:
+                matchExpressions: [{key: e2e/role, operator: In, values: [hub]}]
+      securityContext: {fsGroup: 10011}
+      containers:
+        - name: hub
+          image: ${HUB_IMAGE}
+          imagePullPolicy: IfNotPresent
+          env:
+            - {name: HUB_NAMESPACE, value: emulator-hub}
+            - {name: HUB_EMULATOR_IMAGE, value: "${EMULATOR_IMAGE}"}
+            - {name: HUB_SLOT_IPS, value: "${SLOT_IPS}"}
+            - {name: HUB_REAP_INTERVAL_S, value: "2"}
+            - {name: HUB_BOOT_TIMEOUT_S, value: "${BOOT_TIMEOUT_S}"}
+            - name: HUB_API_TOKEN
+              valueFrom: {secretKeyRef: {name: emulator-hub, key: api-token}}
+          ports:
+            - {name: ui, containerPort: 8080}
+            - {name: machine, containerPort: 8081}
+          readinessProbe:
+            httpGet: {path: /healthz, port: ui}
+            periodSeconds: 2
+          resources:
+            requests: {cpu: 50m, memory: 128Mi}
+            limits: {memory: 512Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - {name: data, mountPath: /data}
+      volumes:
+        - name: data
+          persistentVolumeClaim: {claimName: emulator-hub-data}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: emulator-hub, namespace: emulator-hub}
+spec:
+  selector: {app.kubernetes.io/name: emulator-hub}
+  ports:
+    - {name: ui, port: 8080, targetPort: ui}
+    - {name: machine, port: 8081, targetPort: machine}

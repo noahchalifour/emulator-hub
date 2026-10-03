@@ -22,6 +22,8 @@ from emulator_hub.emulator_grpc import KEYS, GrpcScreen
 from emulator_hub.leases import LeaseEngine
 
 log = logging.getLogger(__name__)
+# How long a closed viewer's queued input (a long paste) may keep typing.
+INPUT_DRAIN_S = 60
 
 
 async def handle_input(screen, raw: str) -> None:
@@ -70,11 +72,21 @@ def build_liveview(engine: LeaseEngine, screen_factory: Callable = GrpcScreen) -
             async for jpeg in screen.frames():
                 await websocket.send_bytes(jpeg)
 
+        # Input is applied in order by one worker, so typing (paced, seconds
+        # for a paste) never blocks frames or later messages, and what a viewer
+        # sent is still delivered if it disconnects right after.
+        queue: asyncio.Queue[str | None] = asyncio.Queue()
+
+        async def apply_input():
+            while (raw := await queue.get()) is not None:
+                await handle_input(screen, raw)
+
         async def pump_input():
             while True:
-                await handle_input(screen, await websocket.receive_text())
+                queue.put_nowait(await websocket.receive_text())
 
-        tasks = [asyncio.create_task(pump_frames()), asyncio.create_task(pump_input())]
+        worker = asyncio.create_task(apply_input())
+        tasks = [asyncio.create_task(pump_frames()), asyncio.create_task(pump_input()), worker]
         try:
             done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
             for t in done:
@@ -82,8 +94,13 @@ def build_liveview(engine: LeaseEngine, screen_factory: Callable = GrpcScreen) -
                 if exc and not isinstance(exc, WebSocketDisconnect):
                     log.warning("live view for lease %s ended: %r", lease_id, exc)
         finally:
-            for t in tasks:
-                t.cancel()
+            tasks[0].cancel()
+            tasks[1].cancel()
+            if not worker.done():
+                # Finish what the viewer already sent (bounded), then stop.
+                queue.put_nowait(None)
+                with contextlib.suppress(Exception):
+                    await asyncio.wait_for(worker, INPUT_DRAIN_S)
             await screen.close()
             with contextlib.suppress(Exception):
                 await websocket.close()
